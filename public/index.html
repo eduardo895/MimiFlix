@@ -113,27 +113,39 @@
 
     <nav class="mobile-bottom-nav" aria-label="Navegação móvel">
       <a class="mobile-bottom-link nav-link active" href="#/" data-route="/">
-        <span class="mobile-bottom-icon">⌂</span>
+        <span class="mobile-bottom-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-4.5v-5.5h-5V21H5a1 1 0 0 1-1-1z"/></svg>
+        </span>
         <span>Início</span>
       </a>
       <a class="mobile-bottom-link nav-link" href="#/filmes" data-route="/filmes">
-        <span class="mobile-bottom-icon">🎬</span>
+        <span class="mobile-bottom-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M4 6a2 2 0 0 1 2-2h2.2l1 2H14l1-2h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3l-1-2H9.2l-1 2H6a2 2 0 0 1-2-2zm2 2v8h12V8zm1-2h1.3l-.5-1H7zm8.2 0H17l.2-1h-1.5zM7 18h.8l.5-1H7zm9.7 0h1.5l-.2-1H16.5z"/></svg>
+        </span>
         <span>Filmes</span>
       </a>
       <a class="mobile-bottom-link nav-link" href="#/series" data-route="/series">
-        <span class="mobile-bottom-icon">📺</span>
+        <span class="mobile-bottom-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M7 4h10l-2 3h3a2 2 0 0 1 2 2v8.5a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 17.5V9a2 2 0 0 1 2-2h3zm-1 5v8.5c0 .28.22.5.5.5h11a.5.5 0 0 0 .5-.5V9z"/></svg>
+        </span>
         <span>Séries</span>
       </a>
       <a class="mobile-bottom-link nav-link" href="#/favoritos" data-route="/favoritos">
-        <span class="mobile-bottom-icon">♥</span>
+        <span class="mobile-bottom-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="m12 21.35-1.45-1.32C5.4 15.36 2 12.28 2 8.5A4.98 4.98 0 0 1 7 3.5c1.74 0 3.41.81 4.5 2.08A6 6 0 0 1 16 3.5a4.98 4.98 0 0 1 5 5c0 3.78-3.4 6.86-8.55 11.54z"/></svg>
+        </span>
         <span>Favoritos</span>
       </a>
       <a class="mobile-bottom-link nav-link" href="#/colecoes" data-route="/colecoes">
-        <span class="mobile-bottom-icon">☰</span>
+        <span class="mobile-bottom-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M4 6.5A1.5 1.5 0 0 1 5.5 5h13A1.5 1.5 0 0 1 20 6.5v2A1.5 1.5 0 0 1 18.5 10h-13A1.5 1.5 0 0 1 4 8.5zm0 9A1.5 1.5 0 0 1 5.5 14h13a1.5 1.5 0 0 1 1.5 1.5v2a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5zm3-4.5h10v2H7z"/></svg>
+        </span>
         <span>Coleções</span>
       </a>
       <a class="mobile-bottom-link nav-link" href="#/desporto" data-route="/desporto">
-        <span class="mobile-bottom-icon">🏟</span>
+        <span class="mobile-bottom-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M4 6h16v12H4zm2 2v8h12V8zm1 10h10l1 2H6zm1-7h2v2H8zm6 0h2v2h-2zm-3-2 1-1 1 1v6h-2z"/></svg>
+        </span>
         <span>Ao vivo</span>
       </a>
     </nav>
@@ -215,13 +227,33 @@
           <button id="playerCloseBtn" class="secondary-btn" type="button">✕ Fechar</button>
         </div>
       </div>
-      <div id="playerProviderTabs" class="player-provider-tabs hidden"></div>
-      <div id="playerContext" class="player-context hidden"></div>
       <div id="playerFrameWrap" class="player-frame-wrap">
-        <iframe id="playerFrame" src="" allowfullscreen></iframe>
+        <div id="playerLaunchGate" class="player-launch-gate hidden" aria-live="polite">
+          <div class="player-launch-gate-card">
+            <span class="eyebrow">Arranque protegido</span>
+            <h3 id="playerLaunchTitle">Abrir player externo</h3>
+            <p id="playerLaunchMessage">Este player só será carregado depois do teu clique para reduzir popups automáticos no arranque.</p>
+            <div class="player-launch-actions">
+              <button id="playerLaunchBtn" class="accent-btn" type="button">Abrir player</button>
+            </div>
+          </div>
+        </div>
+        <iframe
+          id="playerFrame"
+          class="hidden"
+          src=""
+          allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
+          allowfullscreen
+          referrerpolicy="no-referrer"
+        ></iframe>
         <div id="subtitleOverlay" class="subtitle-overlay hidden">
           <p id="subtitleText" class="subtitle-text"></p>
         </div>
+      </div>
+      <div id="playerContext" class="player-context hidden"></div>
+      <div class="player-provider-section">
+        <p class="player-provider-label">Escolhe o servidor:</p>
+        <div id="playerProviderTabs" class="player-provider-tabs hidden"></div>
       </div>
     </div>
   </div>

@@ -75,11 +75,17 @@ const playerContext = document.getElementById("playerContext");
 const playerProgressPanel = document.getElementById("playerProgressPanel");
 const playerFrameWrap = document.getElementById("playerFrameWrap");
 const playerFrame = document.getElementById("playerFrame");
+const playerLaunchGate = document.getElementById("playerLaunchGate");
+const playerLaunchTitle = document.getElementById("playerLaunchTitle");
+const playerLaunchMessage = document.getElementById("playerLaunchMessage");
+const playerLaunchBtn = document.getElementById("playerLaunchBtn");
 const playerFullscreenBtn = document.getElementById("playerFullscreenBtn");
 const playerCloseBtn = document.getElementById("playerCloseBtn");
 const subtitleOverlay = document.getElementById("subtitleOverlay");
 const subtitleText = document.getElementById("subtitleText");
 const mobileViewportQuery = window.matchMedia("(max-width: 820px)");
+const PLAYER_FRAME_ALLOW = "autoplay; encrypted-media; picture-in-picture; fullscreen";
+const RIVE_PLAYER_SANDBOX = "allow-scripts allow-same-origin allow-forms allow-presentation";
 
 // ─── State ───────────────────────────────────────────────────
 let sb = null;
@@ -136,6 +142,7 @@ let cloudSyncQueued = false;
 let notificationRefreshPromise = null;
 let latestNotifications = [];
 let activePlaybackSession = null;
+let pendingPlayerLaunch = null;
 
 const MAX_WATCHLIST_ITEMS = 100;
 const MAX_HISTORY_ITEMS = 30;
@@ -610,12 +617,16 @@ function sanitizeAppPreferences(value) {
     ...rawOrder.filter((id) => DEFAULT_HOME_SECTION_ORDER.includes(id)),
     ...DEFAULT_HOME_SECTION_ORDER.filter((id) => !rawOrder.includes(id))
   ];
+  const playerProvider = PLAYER_EMBED_PROVIDERS.some((provider) => provider.id === value?.playerProvider)
+    ? value.playerProvider
+    : "videasy";
   return {
     theme: value?.theme === "light" ? "light" : "dark",
     homeSectionOrder,
     hiddenHomeSections: sanitizeStringList(value?.hiddenHomeSections, DEFAULT_HOME_SECTION_ORDER.length)
       .filter((id) => DEFAULT_HOME_SECTION_ORDER.includes(id)),
     cinemaMode: value?.cinemaMode === false ? false : true,
+    playerProvider,
     playerQuality: ["Auto", "1080p", "720p", "480p"].includes(value?.playerQuality) ? value.playerQuality : "Auto",
     playerAudio: ["Original", "PT-PT", "PT-BR", "EN"].includes(value?.playerAudio) ? value.playerAudio : "Original",
     playerSubtitles: ["Off", "PT-PT", "PT-BR", "EN"].includes(value?.playerSubtitles) ? value.playerSubtitles : "PT-PT"
@@ -1369,6 +1380,26 @@ function syncViewportMode() {
   document.body.classList.toggle("mobile-ui", mobileViewportQuery.matches);
 }
 
+function setupMobileFiltersPanel(filtersWrap, options = {}) {
+  if (!filtersWrap) return;
+  const toggleBtn = filtersWrap.querySelector(".filters-mobile-toggle");
+  const mobileBody = filtersWrap.querySelector(".filters-mobile-body");
+  if (!toggleBtn || !mobileBody) return;
+  const label = String(options.label || "Filtros").trim();
+
+  const setCollapsed = (collapsed) => {
+    filtersWrap.classList.toggle("is-collapsed", collapsed);
+    toggleBtn.setAttribute("aria-expanded", String(!collapsed));
+    toggleBtn.querySelector(".filters-mobile-toggle-title").textContent = label;
+    toggleBtn.querySelector(".filters-mobile-toggle-state").textContent = collapsed ? "Mostrar" : "Esconder";
+  };
+
+  setCollapsed(mobileViewportQuery.matches);
+  toggleBtn.addEventListener("click", () => {
+    setCollapsed(!filtersWrap.classList.contains("is-collapsed"));
+  });
+}
+
 // ─── Auth modal ──────────────────────────────────────────────
 function openAuthModal(mode = "login") {
   authMode = mode;
@@ -1463,6 +1494,9 @@ async function handleLogout() {
 }
 
 loginBtn.addEventListener("click", () => openAuthModal("login"));
+userPill.addEventListener("click", () => {
+  if (currentUser) navigateTo("/perfil");
+});
 authCloseBtn.addEventListener("click", closeAuthModal);
 authModal.addEventListener("click", (e) => { if (e.target === authModal) closeAuthModal(); });
 logoutBtn.addEventListener("click", async (e) => {
@@ -3137,23 +3171,35 @@ async function viewFilmes() {
     appContent.innerHTML = "";
     appContent.appendChild(pageHeader("Filmes"));
     const filtersWrap = document.createElement("section");
-    filtersWrap.className = "filters-panel";
+    filtersWrap.className = "filters-panel filters-panel--discover";
     filtersWrap.innerHTML = `
-      <div class="filters-grid">
-        <label class="filter-field"><span>Género</span><select id="filterGenre">${DISCOVER_GENRES.map((genre) => `<option value="${genre.id}">${escapeHtml(genre.name)}</option>`).join("")}</select></label>
-        <label class="filter-field"><span>Ano mínimo</span><input id="filterYearMin" type="number" min="1950" max="2035" placeholder="2000"></label>
-        <label class="filter-field"><span>Ano máximo</span><input id="filterYearMax" type="number" min="1950" max="2035" placeholder="2026"></label>
-        <label class="filter-field"><span>Nota mínima</span><input id="filterRatingMin" type="number" min="0" max="10" step="0.1" placeholder="6.5"></label>
-        <label class="filter-field"><span>Idioma</span><select id="filterOriginalLanguage"><option value="">Todos</option><option value="en">EN</option><option value="pt">PT</option><option value="es">ES</option><option value="fr">FR</option><option value="ja">JA</option><option value="ko">KO</option></select></label>
-        <label class="filter-field"><span>Duração máxima</span><select id="filterRuntimeMax"><option value="">Qualquer</option><option value="95">Até 95 min</option><option value="120">Até 120 min</option><option value="150">Até 150 min</option><option value="200">Até 200 min</option></select></label>
-        <label class="filter-field"><span>Plataforma</span><select id="filterProvider"><option value="">Todas</option>${STREAMING_PROVIDERS.map((provider) => `<option value="${provider.id}">${escapeHtml(provider.name)}</option>`).join("")}</select></label>
+      <div class="filters-mobile-bar">
+        <button class="filters-mobile-toggle" type="button" aria-expanded="true">
+          <span class="filters-mobile-toggle-copy">
+            <strong class="filters-mobile-toggle-title">Filtros</strong>
+            <small>Género, ano, nota, idioma e plataforma</small>
+          </span>
+          <span class="filters-mobile-toggle-state">Esconder</span>
+        </button>
       </div>
-      <div class="filters-actions">
-        <button class="secondary-btn" type="button" id="openMoodPicker">Mood picker</button>
-        <button class="secondary-btn" type="button" id="clearFilmFilters">Limpar</button>
+      <div class="filters-mobile-body">
+        <div class="filters-grid">
+          <label class="filter-field"><span>Género</span><select id="filterGenre">${DISCOVER_GENRES.map((genre) => `<option value="${genre.id}">${escapeHtml(genre.name)}</option>`).join("")}</select></label>
+          <label class="filter-field"><span>Ano mínimo</span><input id="filterYearMin" type="number" min="1950" max="2035" placeholder="2000"></label>
+          <label class="filter-field"><span>Ano máximo</span><input id="filterYearMax" type="number" min="1950" max="2035" placeholder="2026"></label>
+          <label class="filter-field"><span>Nota mínima</span><input id="filterRatingMin" type="number" min="0" max="10" step="0.1" placeholder="6.5"></label>
+          <label class="filter-field"><span>Idioma</span><select id="filterOriginalLanguage"><option value="">Todos</option><option value="en">EN</option><option value="pt">PT</option><option value="es">ES</option><option value="fr">FR</option><option value="ja">JA</option><option value="ko">KO</option></select></label>
+          <label class="filter-field"><span>Duração máxima</span><select id="filterRuntimeMax"><option value="">Qualquer</option><option value="95">Até 95 min</option><option value="120">Até 120 min</option><option value="150">Até 150 min</option><option value="200">Até 200 min</option></select></label>
+          <label class="filter-field"><span>Plataforma</span><select id="filterProvider"><option value="">Todas</option>${STREAMING_PROVIDERS.map((provider) => `<option value="${provider.id}">${escapeHtml(provider.name)}</option>`).join("")}</select></label>
+        </div>
+        <div class="filters-actions">
+          <button class="secondary-btn" type="button" id="openMoodPicker">Mood picker</button>
+          <button class="secondary-btn" type="button" id="clearFilmFilters">Limpar</button>
+        </div>
       </div>
     `;
     appContent.appendChild(filtersWrap);
+    setupMobileFiltersPanel(filtersWrap, { label: "Filtros de filmes" });
 
     const resultsEl = document.createElement("div");
     appContent.appendChild(resultsEl);
@@ -3223,10 +3269,7 @@ async function viewFilmes() {
 
         const summary = document.createElement("div");
         summary.className = "films-results-head";
-        summary.innerHTML = `
-          <div class="films-results-count">${paginationState.totalResults.toLocaleString("pt-PT")} resultados</div>
-          ${renderFilmsPagination()}
-        `;
+        summary.innerHTML = renderFilmsPagination();
         resultsEl.appendChild(summary);
 
         const grid = document.createElement("div");
@@ -3277,22 +3320,34 @@ async function viewSeries() {
     appContent.innerHTML = "";
     appContent.appendChild(pageHeader("Séries"));
     const filtersWrap = document.createElement("section");
-    filtersWrap.className = "filters-panel";
+    filtersWrap.className = "filters-panel filters-panel--discover";
     filtersWrap.innerHTML = `
-      <div class="filters-grid">
-        <label class="filter-field"><span>Género</span><select id="filterSeriesGenre">${DISCOVER_TV_GENRES.map((genre) => `<option value="${genre.id}">${escapeHtml(genre.name)}</option>`).join("")}</select></label>
-        <label class="filter-field"><span>Ano mínimo</span><input id="filterSeriesYearMin" type="number" min="1950" max="2035" placeholder="2010"></label>
-        <label class="filter-field"><span>Ano máximo</span><input id="filterSeriesYearMax" type="number" min="1950" max="2035" placeholder="2026"></label>
-        <label class="filter-field"><span>Nota mínima</span><input id="filterSeriesRatingMin" type="number" min="0" max="10" step="0.1" placeholder="7.0"></label>
-        <label class="filter-field"><span>Idioma</span><select id="filterSeriesLanguage"><option value="">Todos</option><option value="en">EN</option><option value="pt">PT</option><option value="es">ES</option><option value="fr">FR</option><option value="ja">JA</option><option value="ko">KO</option></select></label>
-        <label class="filter-field"><span>Estado</span><select id="filterSeriesSort"><option value="popularity.desc">Mais populares</option><option value="vote_average.desc">Melhor classificadas</option><option value="first_air_date.desc">Mais recentes</option></select></label>
-        <label class="filter-field"><span>Plataforma</span><select id="filterSeriesProvider"><option value="">Todas</option>${STREAMING_PROVIDERS.map((provider) => `<option value="${provider.id}">${escapeHtml(provider.name)}</option>`).join("")}</select></label>
+      <div class="filters-mobile-bar">
+        <button class="filters-mobile-toggle" type="button" aria-expanded="true">
+          <span class="filters-mobile-toggle-copy">
+            <strong class="filters-mobile-toggle-title">Filtros</strong>
+            <small>Género, ano, nota, idioma e ordem</small>
+          </span>
+          <span class="filters-mobile-toggle-state">Esconder</span>
+        </button>
       </div>
-      <div class="filters-actions">
-        <button class="secondary-btn" type="button" id="clearSeriesFilters">Limpar</button>
+      <div class="filters-mobile-body">
+        <div class="filters-grid">
+          <label class="filter-field"><span>Género</span><select id="filterSeriesGenre">${DISCOVER_TV_GENRES.map((genre) => `<option value="${genre.id}">${escapeHtml(genre.name)}</option>`).join("")}</select></label>
+          <label class="filter-field"><span>Ano mínimo</span><input id="filterSeriesYearMin" type="number" min="1950" max="2035" placeholder="2010"></label>
+          <label class="filter-field"><span>Ano máximo</span><input id="filterSeriesYearMax" type="number" min="1950" max="2035" placeholder="2026"></label>
+          <label class="filter-field"><span>Nota mínima</span><input id="filterSeriesRatingMin" type="number" min="0" max="10" step="0.1" placeholder="7.0"></label>
+          <label class="filter-field"><span>Idioma</span><select id="filterSeriesLanguage"><option value="">Todos</option><option value="en">EN</option><option value="pt">PT</option><option value="es">ES</option><option value="fr">FR</option><option value="ja">JA</option><option value="ko">KO</option></select></label>
+          <label class="filter-field"><span>Estado</span><select id="filterSeriesSort"><option value="popularity.desc">Mais populares</option><option value="vote_average.desc">Melhor classificadas</option><option value="first_air_date.desc">Mais recentes</option></select></label>
+          <label class="filter-field"><span>Plataforma</span><select id="filterSeriesProvider"><option value="">Todas</option>${STREAMING_PROVIDERS.map((provider) => `<option value="${provider.id}">${escapeHtml(provider.name)}</option>`).join("")}</select></label>
+        </div>
+        <div class="filters-actions">
+          <button class="secondary-btn" type="button" id="clearSeriesFilters">Limpar</button>
+        </div>
       </div>
     `;
     appContent.appendChild(filtersWrap);
+    setupMobileFiltersPanel(filtersWrap, { label: "Filtros de séries" });
 
     const resultsEl = document.createElement("div");
     appContent.appendChild(resultsEl);
@@ -3353,10 +3408,7 @@ async function viewSeries() {
 
         const summary = document.createElement("div");
         summary.className = "films-results-head";
-        summary.innerHTML = `
-          <div class="films-results-count">${paginationState.totalResults.toLocaleString("pt-PT")} resultados</div>
-          ${renderSeriesPagination()}
-        `;
+        summary.innerHTML = renderSeriesPagination();
         resultsEl.appendChild(summary);
 
         const grid = document.createElement("div");
@@ -4182,7 +4234,7 @@ async function viewColecoes() {
   }
 
   const decoratedRealSections = decorateRealCollectionSections(realSections);
-  if (decoratedRealSections.length) {
+  if (decoratedRealSections.length && !mobileViewportQuery.matches) {
     const overview = document.createElement("section");
     overview.className = "profile-stats-grid";
     decoratedRealSections.forEach((section) => {
@@ -5843,6 +5895,71 @@ function buildPlayerEmbedUrl(movie, options = {}) {
     : `${VIDFAST_BASE_URL}/movie/${normalized.id}`;
 }
 
+function setPlayerFrameSource(url, options = {}) {
+  if (!playerFrame) return;
+  playerFrame.setAttribute("allow", PLAYER_FRAME_ALLOW);
+  playerFrame.setAttribute("referrerpolicy", "no-referrer");
+  if (options.sandbox) {
+    playerFrame.setAttribute("sandbox", RIVE_PLAYER_SANDBOX);
+  } else {
+    playerFrame.removeAttribute("sandbox");
+  }
+  const safeUrl = String(url || "").trim();
+  if (safeUrl) {
+    playerFrame.classList.remove("hidden");
+  } else {
+    playerFrame.classList.add("hidden");
+  }
+  playerFrame.src = safeUrl;
+}
+
+function hidePlayerLaunchGate() {
+  pendingPlayerLaunch = null;
+  if (playerLaunchGate) playerLaunchGate.classList.add("hidden");
+}
+
+function showPlayerLaunchGate({ url, title, message, sandbox = false }) {
+  pendingPlayerLaunch = { url: String(url || "").trim(), sandbox: Boolean(sandbox) };
+  if (!playerLaunchGate || !playerLaunchBtn || !playerLaunchTitle || !playerLaunchMessage) {
+    setPlayerFrameSource(url, { sandbox });
+    return;
+  }
+  playerFrame.classList.add("hidden");
+  playerFrame.src = "";
+  playerLaunchTitle.textContent = title;
+  playerLaunchMessage.textContent = message;
+  playerLaunchGate.classList.remove("hidden");
+}
+
+function queuePlayerSource(url, gateConfig = null) {
+  const sandbox = Boolean(gateConfig?.sandbox);
+  if (gateConfig?.enabled) {
+    showPlayerLaunchGate({
+      url,
+      title: gateConfig.title,
+      message: gateConfig.message,
+      sandbox
+    });
+    return;
+  }
+  hidePlayerLaunchGate();
+  setPlayerFrameSource(url, { sandbox });
+}
+
+function buildProviderLaunchConfig(providerId) {
+  const provider = PLAYER_EMBED_PROVIDERS.find((entry) => entry.id === providerId);
+  if (!provider) return null;
+  if (provider.id === "rivestream") {
+    return { enabled: false, sandbox: true };
+  }
+  return {
+    enabled: true,
+    title: `Abrir ${provider.label}`,
+    message: `${provider.label} será carregado só depois do teu clique para reduzir popups automáticos no arranque.`,
+    sandbox: false
+  };
+}
+
 function renderPlayerProviderTabs(movie) {
   if (!playerProviderTabs) return;
   if (!movie) {
@@ -5868,12 +5985,12 @@ function renderPlayerProviderTabs(movie) {
       appPreferences.playerProvider = nextProvider;
       saveAppPreferences();
       activePlaybackSession.provider = nextProvider;
-      playerFrame.src = buildPlayerEmbedUrl(activePlaybackSession.movie, {
+      queuePlayerSource(buildPlayerEmbedUrl(activePlaybackSession.movie, {
         provider: nextProvider,
         season: activePlaybackSession.season,
         episode: activePlaybackSession.episode,
         progressSeconds: activePlaybackSession.basePositionSeconds
-      });
+      }), buildProviderLaunchConfig(nextProvider));
       renderPlayerProviderTabs(activePlaybackSession.movie);
       renderPlayerContext(activePlaybackSession.movie);
     });
@@ -5898,23 +6015,13 @@ function renderPlayerContext(movie) {
   const provider = PLAYER_EMBED_PROVIDERS.find((entry) => entry.id === (activePlaybackSession?.provider || getCurrentPlayerProvider()));
   const chips = [];
   const year = String(normalized.release_date || normalized.first_air_date || "").slice(0, 4);
-  const runtime = Number(activePlaybackSession?.runtime || normalized.runtime || 0);
-  const score = typeof normalized.vote_average === "number" && normalized.vote_average > 0
-    ? normalized.vote_average.toFixed(1)
-    : "";
 
   if (provider?.label) chips.push(provider.label);
   chips.push(getMediaType(normalized) === "tv" ? "Série" : "Filme");
   if (year) chips.push(year);
-  if (runtime) chips.push(formatMinutesAsHours(runtime));
-  if (score) chips.push(`★ ${score}`);
   if (getMediaType(normalized) === "tv") {
     chips.push(formatEpisodeLabel(activePlaybackSession?.season || normalized.selectedSeason || 1, activePlaybackSession?.episode || normalized.selectedEpisode || 1));
   }
-  const overview = String(normalized.overview || "").trim();
-  const backdrop = normalized.backdrop_path ? `${IMAGE_BASE_URL}${normalized.backdrop_path}` : "";
-  const poster = normalized.poster_path ? `${POSTER_BASE_URL}${normalized.poster_path}` : PLACEHOLDER_POSTER;
-  const progress = getPlayerProgress(normalized, activePlaybackSession || normalized);
   const nextEpisodeTarget = getMediaType(normalized) === "tv"
     ? getSeriesNextEpisodeTarget(normalized, {
         season: activePlaybackSession?.season || normalized.selectedSeason || 1,
@@ -5924,39 +6031,11 @@ function renderPlayerContext(movie) {
 
   playerContext.classList.remove("hidden");
   playerContext.innerHTML = `
-    <div class="player-context-card"${backdrop ? ` style="--player-backdrop:url('${backdrop}')"` : ""}>
-      <div class="player-context-backdrop"></div>
-      <div class="player-context-inner">
-        <img class="player-context-poster" src="${poster}" alt="${escapeHtml(normalized.title)}">
-        <div class="player-context-copy">
-          <div class="player-context-topline">Sessão MimiFlix</div>
-          <div class="player-context-meta">
-            ${chips.map((chip, index) => `<span class="chip${index === 0 ? " chip-accent" : ""}">${escapeHtml(chip)}</span>`).join("")}
-          </div>
-          <p class="player-context-overview">${escapeHtml(overview || "Player externo integrado com o teu tema MimiFlix para uma experiência mais limpa e focada no conteúdo.")}</p>
-        </div>
-        <div class="player-context-side">
-          <div class="player-context-stat">
-            <span class="player-context-label">Fonte ativa</span>
-            <strong>${escapeHtml(provider?.label || "Embed")}</strong>
-          </div>
-          <div class="player-context-stat">
-            <span class="player-context-label">Retoma</span>
-            <strong>${progress?.positionSeconds ? formatProgressTime(progress.positionSeconds) : "Do início"}</strong>
-          </div>
-          <div class="player-context-stat">
-            <span class="player-context-label">Estado</span>
-            <strong>${progress?.progressPercent ? `${progress.progressPercent}% visto` : "Nova sessão"}</strong>
-          </div>
-          ${nextEpisodeTarget ? `
-            <div class="player-context-stat player-context-stat--action">
-              <span class="player-context-label">Próximo episódio</span>
-              <strong>${escapeHtml(formatEpisodeLabel(nextEpisodeTarget.season, nextEpisodeTarget.episode))}</strong>
-              <button class="secondary-btn player-next-episode-btn" type="button" data-player-series-action="next">Avançar episódio</button>
-            </div>
-          ` : ""}
-        </div>
+    <div class="player-context-inline">
+      <div class="player-context-meta">
+        ${chips.map((chip, index) => `<span class="chip${index === 0 ? " chip-accent" : ""}">${escapeHtml(chip)}</span>`).join("")}
       </div>
+      ${nextEpisodeTarget ? `<button class="secondary-btn player-next-episode-btn" type="button" data-player-series-action="next">Avançar para ${escapeHtml(formatEpisodeLabel(nextEpisodeTarget.season, nextEpisodeTarget.episode))}</button>` : ""}
     </div>
   `;
 
@@ -6001,12 +6080,12 @@ function openPlayer(movie) {
   playerTitle.textContent = isTv ? `${normalized.title} — ${formatEpisodeLabel(season, episode)}` : normalized.title;
   renderPlayerProviderTabs(activePlaybackSession.movie);
   renderPlayerContext(activePlaybackSession.movie);
-  playerFrame.src = buildPlayerEmbedUrl(activePlaybackSession.movie, {
+  queuePlayerSource(buildPlayerEmbedUrl(activePlaybackSession.movie, {
     provider,
     season,
     episode,
     progressSeconds: existingProgress?.positionSeconds || 0
-  });
+  }), buildProviderLaunchConfig(provider));
   renderPlayerProgressPanel(activePlaybackSession.movie);
   activePlaybackSession.intervalId = setInterval(() => {
     if (!activePlaybackSession || activePlaybackSession.movieId !== normalized.id) return;
@@ -6030,7 +6109,7 @@ function openTrailer(key, title) {
   renderPlayerProviderTabs(null);
   renderPlayerContext(null);
   playerTitle.textContent = `${title} — Trailer`;
-  playerFrame.src = `https://www.youtube.com/embed/${key}?autoplay=1`;
+  queuePlayerSource(`https://www.youtube.com/embed/${key}?autoplay=1`);
   applyPlayerCinemaMode(appPreferences.cinemaMode);
   document.documentElement.classList.add("player-open");
   document.body.classList.add("player-open");
@@ -6068,9 +6147,13 @@ function openLiveSportStream(match, stream) {
       </div>
     </div>
   `;
-  playerFrame.src = usesEmbed
+  queuePlayerSource(usesEmbed
     ? streamUrl
-    : `live-player.html?src=${encodeURIComponent(streamUrl)}&title=${encodeURIComponent(match.title)}`;
+    : `live-player.html?src=${encodeURIComponent(streamUrl)}&title=${encodeURIComponent(match.title)}`, usesEmbed ? {
+      enabled: true,
+      title: `Abrir ${stream.label}`,
+      message: `${stream.label} só será carregado após o teu clique para reduzir popups e redirecionamentos automáticos no arranque.`
+    } : null);
   applyPlayerCinemaMode(appPreferences.cinemaMode);
   document.documentElement.classList.add("player-open");
   document.body.classList.add("player-open");
@@ -6097,7 +6180,8 @@ function closePlayer() {
   }
   renderPlayerProviderTabs(null);
   renderPlayerContext(null);
-  playerFrame.src = "";
+  hidePlayerLaunchGate();
+  setPlayerFrameSource("");
   if (playerFrameWrap) playerFrameWrap.classList.remove("is-player-fullscreen");
   document.removeEventListener("keydown", handlePlayerShortcuts);
   applyPlayerCinemaMode(false);
@@ -6576,6 +6660,12 @@ detailListBtn.addEventListener("click", () => { if (selectedMovie) showListPicke
 detailCloseBtn.addEventListener("click", closeDetails);
 detailCloseFooterBtn.addEventListener("click", closeDetails);
 playerFullscreenBtn?.addEventListener("click", () => { togglePlayerFullscreen().catch(() => {}); });
+  playerLaunchBtn?.addEventListener("click", () => {
+  if (!pendingPlayerLaunch?.url) return;
+  const { url, sandbox } = pendingPlayerLaunch;
+  hidePlayerLaunchGate();
+  setPlayerFrameSource(url, { sandbox });
+});
 playerCloseBtn.addEventListener("click", closePlayer);
 detailModal.addEventListener("click", (e) => {
   if (e.target === detailModal && !detailModal.classList.contains("detail-route-shell")) closeDetails();
